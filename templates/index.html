@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Skin Tone Classifier</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .upload-form {
+            margin-bottom: 20px;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .result {
+            margin-bottom: 20px;
+        }
+        .result img {
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <h1>Upload Images for Skin Tone Classification</h1>
+    <form class="upload-form" id="upload-form" enctype="multipart/form-data">
+        <input type="file" name="files" id="files" multiple>
+        <button type="submit">Upload</button>
+    </form>
+    <div class="results" id="results"></div>
+
+    <script>
+        document.getElementById('upload-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const files = document.getElementById('files').files;
+            if (files.length === 0) {
+                alert('Please select files to upload.');
+                return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+
+            const response = await fetch('/yolo', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                alert('Failed to upload files.');
+                return;
+            }
+
+            const results = await response.json();
+            const resultsContainer = document.getElementById('results');
+            resultsContainer.innerHTML = '';
+
+            results.forEach((result, index) => {
+                const resultDiv = document.createElement('div');
+                resultDiv.classList.add('result');
+
+                const title = document.createElement('h2');
+                title.innerText = `Result ${index + 1}`;
+                resultDiv.appendChild(title);
+
+                const yoloClass = document.createElement('p');
+                yoloClass.innerText = `Class: ${result.class}`;
+                resultDiv.appendChild(yoloClass);
+
+                const skinToneResult = document.createElement('pre');
+                skinToneResult.innerText = JSON.stringify(result.skin_tone_result, null, 2);
+                resultDiv.appendChild(skinToneResult);
+
+                const reportImage = document.createElement('img');
+                reportImage.src = `/uploads/${result.report_image_path}`;
+                resultDiv.appendChild(reportImage);
+
+                resultsContainer.appendChild(resultDiv);
+            });
+        });
+    </script>
+</body>
+</html>

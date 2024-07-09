@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Classification</title>
+</head>
+<body>
+    <h1>Image Classification using K-means</h1>
+    <form id="upload-form" action="/predict-kmeans" method="post" enctype="multipart/form-data">
+        <input type="file" name="file" multiple>
+        <input type="submit" value="Upload">
+    </form>
+    <div id="results"></div>
+
+    <script>
+        document.querySelector('#upload-form').onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const response = await fetch('/predict-kmeans', {
+                method: 'POST',
+                body: formData
+            });
+            const results = await response.json();
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = ''; // Clear previous results
+
+            if (results.error) {
+                resultsDiv.innerText = results.error;
+            } else {
+                results.forEach(result => {
+                    const resultDiv = document.createElement('div');
+                    resultDiv.innerText = `Filename: ${result.filename}, Predicted Class: ${result.class}`;
+                    resultsDiv.appendChild(resultDiv);
+                });
+            }
+        };
+    </script>
+</body>
+</html>
