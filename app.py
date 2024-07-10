@@ -2,36 +2,33 @@ from flask import Flask, request, jsonify, render_template, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
-import tensorflow as tf
-from tensorflow.keras.preprocessing import image
 import numpy as np
-import joblib
-from skimage.io import imread
-from skimage.transform import resize
-
+from ultralytics import YOLO
+import stone
+from PIL import Image
+import cv2
 from routes.categories import categories_blueprint
 from routes.detail import detail_blueprint
+import time  # Add this import for timestamp generation
 
-app = Flask(__name__, static_folder='img')
+app = Flask(__name__, static_folder='uploads')
 CORS(app)
 
-# CNN
-MODEL_PATH = '/Users/fadhilahmad/Documents/filry/flask/model/Warna Kulit-Warna Kulit -64.75.h5'
+# YOLO v8
+model_path = '/Users/fadhilahmad/Documents/filry/model yolo/runs/classify/train4/weights/best.pt'
+model = YOLO(model_path)
 
-model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.001), 
-              loss='categorical_crossentropy', 
-              metrics=['accuracy'])
+def classify_image(image_path):
+    results = model(image_path)
+    names_dict = results[0].names
+    probs = results[0].probs.data.tolist()
+    predicted_class = names_dict[np.argmax(probs)]
+    return predicted_class
 
-# K-means
-kmeans_model = joblib.load('/Users/fadhilahmad/Documents/filry/flask/model/kmeans_model.joblib')
-label_encoder = joblib.load('/Users/fadhilahmad/Documents/filry/flask/model/label_encoder.joblib')
-
-# Image preprocessing function k-means
-def preprocess_image(filepath):
-    image = imread(filepath)
-    image = resize(image, (224, 224), anti_aliasing=True)
-    return image.flatten()
+def process_skin_tone(image_path):
+    result = stone.process(image_path, image_type="color", return_report_image=True)
+    report_images = result.pop("report_images")  # Obtain and remove the report image from the `result`
+    return report_images, result
 
 # Ensure the uploads folder exists
 UPLOAD_FOLDER = 'uploads'
@@ -42,49 +39,12 @@ if not os.path.exists(UPLOAD_FOLDER):
 def home():
     return render_template('index.html')
 
-@app.route('/kmeans')
-def kmeans():
-    return render_template('kmeans.html')
-
-@app.route('/img/<path:filename>')
+@app.route('/uploads/<path:filename>')
 def send_file(filename):
-    return send_from_directory(app.static_folder, filename)
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
-@app.route('/predict', methods=['POST'])
-def predict():
-    files = request.files.getlist('files')
-    if not files:
-        return "No files part in the request", 400
-    
-    results = []
-    class_indices = {0: 'Tidak Diketahui', 1: 'Warm', 2: 'Neutral', 3: 'Cool'}
-    
-    for file in files:
-        if file.filename == '':
-            return "No selected file", 400
-        
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(file_path)
-        
-        img = image.load_img(file_path, target_size=(224, 224))
-        img_array = image.img_to_array(img)
-        img_array = np.expand_dims(img_array, axis=0) / 255.0
-        
-        predictions = model.predict(img_array)
-        predicted_class = class_indices[np.argmax(predictions)]
-        confidence = np.max(predictions)
-        
-        result = {
-            'class': predicted_class,
-            'confidence': float(confidence)
-        }
-        results.append(result)
-    
-    return jsonify(results)
-
-@app.route('/predict-kmeans', methods=['POST'])
-def predict_kmeans():
+@app.route('/yolo', methods=['POST'])
+def upload_files():
     if 'files' not in request.files:
         return jsonify({'error': 'No files uploaded'}), 400
 
@@ -98,26 +58,45 @@ def predict_kmeans():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
 
-        # Save the uploaded file
-        filepath = os.path.join(UPLOAD_FOLDER, secure_filename(file.filename))
+        # Save the uploaded file with a secure filename
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
 
-        # Preprocess the image
-        image = preprocess_image(filepath)
-        image = np.expand_dims(image, axis=0)
+        # Classify the image and process the skin tone
+        predicted_class = classify_image(filepath)
+        report_images, skin_tone_result = process_skin_tone(filepath)
 
-        # Predict the class using K-means model
-        pred = kmeans_model.predict(image)
-        class_name = label_encoder.inverse_transform(pred)[0]
+        # Save the report image with a unique filename
+        report_image_path = save_report_image(report_images, filename)
 
-        results.append({
-            'class': class_name
-        })
+        result = {
+            'class': predicted_class,
+            'skin_tone_result': skin_tone_result,
+            'report_image_path': report_image_path
+        }
+
+        results.append(result)
 
     return jsonify(results)
+
+def save_report_image(report_images, original_filename):
+    face_id = 1  # Assuming you want the first face's report image
+
+    # Generate a unique filename using the current timestamp
+    unique_suffix = str(int(time.time()))  # Or you can use uuid.uuid4() for UUID
+    unique_filename = f'report_{unique_suffix}_{original_filename}'
+    report_image_path = os.path.join(UPLOAD_FOLDER, unique_filename)
+    
+    # Convert the numpy array (BGR) to RGB before saving
+    report_image_rgb = cv2.cvtColor(report_images[face_id], cv2.COLOR_BGR2RGB)
+    report_image_pil = Image.fromarray(report_image_rgb)
+    report_image_pil.save(report_image_path)
+    
+    return unique_filename
 
 app.register_blueprint(categories_blueprint)
 app.register_blueprint(detail_blueprint)
 
 if __name__ == "__main__":
-    app.run(host="192.168.26.16",debug=True)
+    app.run(host="192.168.26.16", debug=True)
